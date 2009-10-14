@@ -19,48 +19,37 @@ using System;
 using System.Collections.Generic;
 using System.Text.RegularExpressions;
 
-using Gnome.Vfs;
+using GLib;
 
 using Docky.Items;
 using Docky.Menus;
 using Docky.Services;
 
-namespace RemovableDevices
+namespace Mounter
 {
 	
-	
-	public class VolumeItem : IconDockItem
+	public class MountItem : IconDockItem
 	{
 		
 		#region IconDockItem implementation
 		
 		public override string UniqueID ()
 		{
-			return VfsVolume.ActivationUri;
+			return Mnt.Handle.ToString ();
 		}
 		
 		#endregion
 		
-		public VolumeItem (Volume volume)
+		public MountItem (Mount mount)
 		{
-			VfsVolume = volume;
+			Mnt = mount;
 			
-			Icon = volume.Icon;
+			SetIconFromGIcon (mount.Icon);
 			
-			if (StringIsUUID (volume.DisplayName))
-				HoverText = string.Format ("{0} ({1})", volume.DeviceType.ToString (), volume.DevicePath);
-			else
-				HoverText = volume.DisplayName;
+			HoverText = Mnt.Name;
 		}
 		
-		bool StringIsUUID (string uuid)
-		{
-			Regex regex = new Regex ("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}");
-			
-			return regex.IsMatch (uuid);
-		}
-		
-		public Volume VfsVolume { get; private set; }
+		public Mount Mnt { get; private set; }
 		
 		protected override ClickAnimation OnClicked (uint button, Gdk.ModifierType mod, double xPercent, double yPercent)
 		{
@@ -74,19 +63,35 @@ namespace RemovableDevices
 		
 		void OpenVolume ()
 		{
-			DockServices.System.Open (VfsVolume.ActivationUri);
+			DockServices.System.Open (Mnt.Root.ToString ());
 		}
 		
-		void UnMount ()
+		public void UnMount ()
 		{
-			VfsVolume.Unmount ( (s,e,d) => {} );
+			Log<MountItem>.Debug ("Trying to unmount {0}.", Mnt.Name);
+			if (Mnt.CanEject ())
+				Mnt.Eject (MountUnmountFlags.Force, null, new AsyncReadyCallback (HandleMountFinished));
+			else
+				Mnt.Unmount (MountUnmountFlags.Force, null, new AsyncReadyCallback (HandleMountFinished));
+		}
+		
+		void HandleMountFinished (GLib.Object sender, AsyncResult result)
+		{
+			string success = "successful";
+			if (!Mnt.UnmountFinish (result))
+				success = "failed";
+			
+			Log<MountItem>.Debug ("Unmount of {0} {1}.", Mnt.Name, success);
+			    
 		}
 		
 		public override IEnumerable<MenuItem> GetMenuItems ()
 		{
 			yield return new MenuItem ("Open", Icon, (o, a) => OpenVolume ());
-			string removeLabel = (VfsVolume.Drive.NeedsEject ()) ? "Eject" : "Unmount";
-			yield return new MenuItem (removeLabel, "media-eject", (o, a) => UnMount ());
+			if (Mnt.CanEject () || Mnt.CanUnmount) {
+				string removeLabel = (Mnt.CanEject ()) ? "Eject" : "Unmount";
+				yield return new MenuItem (removeLabel, "media-eject", (o, a) => UnMount ());
+			}
 		}
 
 	}
